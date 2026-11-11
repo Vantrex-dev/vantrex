@@ -339,7 +339,7 @@ const MARKET_DATA_PROVIDER='simulated';
 function symbolSeed(symbol){let h=2166136261;for(let i=0;i<symbol.length;i++)h=Math.imul(h^symbol.charCodeAt(i),16777619);return h>>>0}
 function demoBasePrice(symbol){return 18+(symbolSeed(symbol)%48000)/100}
 function demoDayPrice(symbol,day){let seed=symbolSeed(symbol),phase=(seed%10000)/10000*Math.PI*2,base=demoBasePrice(symbol),vol=marketSettings.volatility,drift=Math.max(-.35,Math.min(.35,marketSettings.trend*.0007*(day-marketSettings.anchorDay)));return base*(1+vol*.075*Math.sin(day*.021+phase)+vol*.028*Math.sin(day*.083+phase*1.7)+drift)}
-function demoIntradayPrice(symbol,day,progress){let seed=symbolSeed(symbol),phase=(seed%7000)/7000*Math.PI*2,open=demoDayPrice(symbol,day),vol=marketSettings.volatility,wave=vol*.006*(Math.sin(progress*Math.PI*2+phase)-Math.sin(phase))+vol*.0018*(Math.sin(progress*Math.PI*10+phase*.7)-Math.sin(phase*.7));return open*(1+wave)}
+function demoIntradayPrice(symbol,day,progress){let seed=symbolSeed(symbol),phase=(seed%7000)/7000*Math.PI*2,open=demoDayPrice(symbol,day),vol=marketSettings.volatility,wave=vol*.006*(Math.sin(progress*Math.PI*2+phase)-Math.sin(phase))+vol*.0018*(Math.sin(progress*Math.PI*10+phase*.7)-Math.sin(phase*.7))+marketSettings.trend*.0007*progress;return open*(1+wave)}
 const MARKET_SETTINGS_KEY='vantrex-market-settings-v1';
 function defaultMarketSettings(){let now=Date.now(),minute=now/60000;return{volatility:1,trend:0,speed:1,paused:false,anchorWall:now,anchorMinute:minute,anchorDay:Math.floor(minute/390)}}
 let marketSettings=(()=>{let d=defaultMarketSettings();try{let saved=JSON.parse(localStorage.getItem(MARKET_SETTINGS_KEY));if(saved&&Number.isFinite(saved.anchorMinute))return{...d,...saved}}catch(e){}return d})();
