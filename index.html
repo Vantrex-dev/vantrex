@@ -347,7 +347,7 @@ function trade(side){
  if(side==='SELL'&&q>h.qty+1e-8)return alert('You do not own enough shares.');
  let meta=quotes[selected]?.meta||{},marketState=meta.marketState||'UNKNOWN',quoteTime=meta.regularMarketTime?new Date(meta.regularMarketTime*1000).toISOString():null;
  let marketLabel=marketState==='REGULAR'?'Regular market session':marketState==='PRE'?'Pre-market session':marketState==='POST'?'After-hours session':marketState==='CLOSED'?'Market closed':'Market session status unavailable';
- let message='Confirm simulated '+side+' order\\n\\n'+selected+' · '+q.toFixed(4)+' shares\\nReference price: '+fmt(p)+' per share\\nEstimated total: '+fmt(total)+'\\n'+marketLabel+'\\n\\nThis is a virtual market order. The reference quote may be delayed; no real shares or money are involved.';
+ let message='Confirm simulated '+side+' order\n\n'+selected+' · '+q.toFixed(4)+' shares\nReference price: '+fmt(p)+' per share\nEstimated total: '+fmt(total)+'\n'+marketLabel+'\n\nThis is a virtual market order. The reference quote may be delayed; no real shares or money are involved.';
  if(!confirm(message))return;
  if(side==='BUY'){h.avg=(h.avg*h.qty+total)/(h.qty+q);h.qty+=q;account.cash-=total;account.holdings[selected]=h}else{h.qty-=q;account.cash+=total;if(h.qty<1e-8)delete account.holdings[selected]}
  account.history.unshift({side,symbol:selected,qty:q,total,executionPrice:p,quoteTime,marketState,orderType:'MARKET',time:new Date().toISOString()});
