@@ -165,10 +165,13 @@ let account=(()=>{try{let x=JSON.parse(localStorage.getItem(KEY));if(x&&Number.i
 const $=id=>document.getElementById(id),fmt=n=>Number(n).toLocaleString('en-US',{style:'currency',currency:'USD'}),save=()=>localStorage.setItem(KEY,JSON.stringify(account)),current=s=>quotes[s]?.price??null;
 const SPREAD_RATE=0.001; // 0.10% total simulated spread
 function quoteSides(symbol){let mid=current(symbol);if(!Number.isFinite(mid)||mid<=0)return null;let half=Math.max(0.0001,mid*SPREAD_RATE/2);return{mid,bid:Math.max(0.0001,mid-half),ask:mid+half,spread:half*2}}
-function reservedCash(){return account.pending.filter(o=>o.side==='BUY').reduce((sum,o)=>sum+Math.max(0,Number(o.qty)||0)*Math.max(0,Number(o.limitPrice)||0),0)}
-function reservedShares(symbol){return account.pending.filter(o=>o.side==='SELL'&&o.symbol===symbol).reduce((sum,o)=>sum+Math.max(0,Number(o.qty)||0),0)}
-function availableCash(){return Math.max(0,account.cash-reservedCash())}
-function availableShares(symbol){return Math.max(0,(account.holdings[symbol]?.qty||0)-reservedShares(symbol))}
+function remainingOrderQty(order){return Math.max(0,Number(order.remainingQty??((Number(order.qty)||0)-(Number(order.filledQty)||0)))||0)}
+function reservedCash(excludeId){return account.pending.filter(o=>o.side==='BUY'&&o.id!==excludeId).reduce((sum,o)=>sum+remainingOrderQty(o)*Math.max(0,Number(o.limitPrice)||0),0)}
+function reservedShares(symbol,excludeId){return account.pending.filter(o=>o.side==='SELL'&&o.symbol===symbol&&o.id!==excludeId).reduce((sum,o)=>sum+remainingOrderQty(o),0)}
+function availableCash(excludeId){return Math.max(0,account.cash-reservedCash(excludeId))}
+function availableShares(symbol,excludeId){return Math.max(0,(account.holdings[symbol]?.qty||0)-reservedShares(symbol,excludeId))}
+// Each 60-second market refresh has a deterministic, fictional per-symbol liquidity budget.
+function simulatedLiquidity(symbol){return 8+(symbolSeed(symbol)%33)}
 account.pending=Array.isArray(account.pending)?account.pending:[];account.orderLog=Array.isArray(account.orderLog)?account.orderLog:account.pending.map(o=>({...o,status:'OPEN'}));
 const directory=[
 {symbol:'AAPL',name:'Apple Inc.',sector:'Technology',detail:'Consumer electronics and software'},
@@ -344,14 +347,15 @@ function renderOrderManagement(){
  $('orderManagementList').innerHTML=shown.length?shown.map(o=>{
   const isFilled=o.status==='FILLED',price=isFilled?(o.executionPrice||o.limitPrice||0):(o.limitPrice||0),amount=Number(o.qty||0)*price;
   const type=o.orderType==='MARKET'?'Market order':'Limit order';
-  const details=o.orderType==='MARKET'?'Executed at '+fmt(price)+' per share ('+(o.side==='BUY'?'ask':'bid')+')':'Limit '+fmt(o.limitPrice||0)+(isFilled?' · Filled at '+fmt(o.executionPrice||o.limitPrice||0)+' ('+(o.side==='BUY'?'ask':'bid')+')':' · Waiting for simulated '+(o.side==='BUY'?'ask':'bid')+' price · '+(o.side==='BUY'?'Reserves '+fmt((Number(o.qty)||0)*(Number(o.limitPrice)||0)):'Reserves '+(Number(o.qty)||0).toFixed(4)+' shares'));
-  const updated=o.updatedAt&&o.status!=='OPEN'?'Updated '+new Date(o.updatedAt).toLocaleString():'Placed '+new Date(o.createdAt||Date.now()).toLocaleString();
-  return '<div class="order-record"><div class="order-record-main"><div class="order-record-title"><b>'+safeText(o.side)+' '+safeText(o.symbol)+'</b><span class="order-status '+safeText(o.status)+'">'+safeText(o.status)+'</span></div><small>'+Number(o.qty||0).toFixed(4)+' shares · '+type+' · '+details+'</small><small>'+updated+'</small></div><div class="order-record-actions"><b>'+fmt(amount)+'</b>'+(o.status==='OPEN'?'<button type="button" data-order-cancel="'+safeText(o.id)+'">Cancel order</button>':'')+'</div></div>';
+  const remaining=remainingOrderQty(o),filled=Number(o.filledQty)||0;
+  const details=o.orderType==='MARKET'?'Executed at '+fmt(price)+' per share ('+(o.side==='BUY'?'ask':'bid')+')':'Limit '+fmt(o.limitPrice||0)+(isFilled?' · Filled at '+fmt(o.executionPrice||o.limitPrice||0)+' ('+(o.side==='BUY'?'ask':'bid')+')':(filled>0?' · Partially filled '+filled.toFixed(4)+' / '+Number(o.qty||0).toFixed(4)+' · Avg fill '+fmt(o.executionPrice||0)+' · Remaining '+remaining.toFixed(4):' · Waiting for simulated '+(o.side==='BUY'?'ask':'bid')+' price')+' · '+(o.side==='BUY'?'Reserves '+fmt(remaining*(Number(o.limitPrice)||0)):'Reserves '+remaining.toFixed(4)+' shares'));
+  const updated=o.updatedAt?'Updated '+new Date(o.updatedAt).toLocaleString():'Placed '+new Date(o.createdAt||Date.now()).toLocaleString();
+  return '<div class="order-record"><div class="order-record-main"><div class="order-record-title"><b>'+safeText(o.side)+' '+safeText(o.symbol)+'</b><span class="order-status '+safeText(o.status)+'">'+safeText(o.status==='OPEN'&&Number(o.filledQty)>0?'PARTIALLY FILLED':o.status)+'</span></div><small>'+Number(o.qty||0).toFixed(4)+' shares · '+type+' · '+details+'</small><small>'+updated+'</small></div><div class="order-record-actions"><b>'+fmt(amount)+'</b>'+(o.status==='OPEN'?'<button type="button" data-order-cancel="'+safeText(o.id)+'">Cancel order</button>':'')+'</div></div>';
  }).join(''):'<div class="empty">No '+(orderFilter==='ALL'?'orders':orderFilter.toLowerCase()+' orders')+' yet. Your simulated orders will appear here.</div>';
  $('orderManagementList').querySelectorAll('[data-order-cancel]').forEach(b=>b.onclick=()=>cancelPendingOrder(b.dataset.orderCancel));
 }
 document.querySelectorAll('[data-order-filter]').forEach(b=>b.onclick=()=>{orderFilter=b.dataset.orderFilter;renderOrderManagement()});
-function render(){let holdings=Object.entries(account.holdings),total=account.cash+holdings.reduce((a,[s,h])=>a+(current(s)??h.avg)*h.qty,0),ret=total-START;$('value').textContent=fmt(total);$('cash').textContent=fmt(availableCash());$('buying').textContent=fmt(availableCash());$('return').textContent=(ret>=0?'+':'')+fmt(ret);$('percent').textContent=(ret/START*100).toFixed(2)+'% overall';$('symbol').textContent=selected+' · '+(names[selected]||selected);$('tradeSymbol').textContent=selected;$('price').textContent=current(selected)?fmt(current(selected)):'Quote unavailable';let sides=quoteSides(selected);$('quoteSpread').innerHTML=sides?'<span>Bid <b>'+fmt(sides.bid)+'</b></span><span>Ask <b>'+fmt(sides.ask)+'</b></span><span>Spread <b>'+fmt(sides.spread)+'</b></span>':'<span>Bid —</span><span>Ask —</span><span>Spread —</span>';$('change').textContent=quotes[selected]?(quotes[selected].change>=0?'+':'')+quotes[selected].change.toFixed(2)+'% today':'Demo price unavailable';let estimateQty=+$('qty').value;$('buyEstimate').textContent=sides&&estimateQty>0?fmt(sides.ask*estimateQty):'—';$('sellEstimate').textContent=sides&&estimateQty>0?fmt(sides.bid*estimateQty):'—';let pending=account.pending.filter(o=>o.symbol===selected);$('pendingOrders').hidden=!pending.length;$('pendingOrdersList').innerHTML=pending.map(o=>'<div class="pending-order"><span><b>'+safeText(o.side)+' '+safeText(o.symbol)+'</b><small>'+o.qty.toFixed(4)+' shares · limit '+fmt(o.limitPrice)+(o.side==='BUY'?' · reserves '+fmt(o.qty*o.limitPrice):' · reserves '+o.qty.toFixed(4)+' shares')+'</small></span><button type="button" data-cancel-order="'+safeText(o.id)+'">Cancel</button></div>').join('');$('pendingOrdersList').querySelectorAll('[data-cancel-order]').forEach(b=>b.onclick=()=>cancelPendingOrder(b.dataset.cancelOrder));renderOrderManagement();
+function render(){let holdings=Object.entries(account.holdings),total=account.cash+holdings.reduce((a,[s,h])=>a+(current(s)??h.avg)*h.qty,0),ret=total-START;$('value').textContent=fmt(total);$('cash').textContent=fmt(availableCash());$('buying').textContent=fmt(availableCash());$('return').textContent=(ret>=0?'+':'')+fmt(ret);$('percent').textContent=(ret/START*100).toFixed(2)+'% overall';$('symbol').textContent=selected+' · '+(names[selected]||selected);$('tradeSymbol').textContent=selected;$('price').textContent=current(selected)?fmt(current(selected)):'Quote unavailable';let sides=quoteSides(selected);$('quoteSpread').innerHTML=sides?'<span>Bid <b>'+fmt(sides.bid)+'</b></span><span>Ask <b>'+fmt(sides.ask)+'</b></span><span>Spread <b>'+fmt(sides.spread)+'</b></span>':'<span>Bid —</span><span>Ask —</span><span>Spread —</span>';$('change').textContent=quotes[selected]?(quotes[selected].change>=0?'+':'')+quotes[selected].change.toFixed(2)+'% today':'Demo price unavailable';let estimateQty=+$('qty').value;$('buyEstimate').textContent=sides&&estimateQty>0?fmt(sides.ask*estimateQty):'—';$('sellEstimate').textContent=sides&&estimateQty>0?fmt(sides.bid*estimateQty):'—';let pending=account.pending.filter(o=>o.symbol===selected);$('pendingOrders').hidden=!pending.length;$('pendingOrdersList').innerHTML=pending.map(o=>'<div class="pending-order"><span><b>'+safeText(o.side)+' '+safeText(o.symbol)+'</b><small>'+remainingOrderQty(o).toFixed(4)+' remaining of '+o.qty.toFixed(4)+' shares · limit '+fmt(o.limitPrice)+(Number(o.filledQty)>0?' · filled '+Number(o.filledQty).toFixed(4):'')+(o.side==='BUY'?' · reserves '+fmt(o.qty*o.limitPrice):' · reserves '+o.qty.toFixed(4)+' shares')+'</small></span><button type="button" data-cancel-order="'+safeText(o.id)+'">Cancel</button></div>').join('');$('pendingOrdersList').querySelectorAll('[data-cancel-order]').forEach(b=>b.onclick=()=>cancelPendingOrder(b.dataset.cancelOrder));renderOrderManagement();
 $('watch').innerHTML=account.watch.map(s=>{let q=quotes[s];return '<div class="row"><button class="stock" data-s="'+s+'"><b>'+s+'</b><div class="sub">'+(names[s]||s+' stock')+'</div></button><b>'+(q?fmt(q.price):'—')+'</b><span class="'+(q&&q.change>=0?'green':'red')+'">'+(q?q.change.toFixed(2)+'%':'No quote')+'</span></div>'}).join('');
 let positionRows=holdings.map(([s,h])=>{let price=current(s)??h.avg,value=price*h.qty,cost=h.avg*h.qty,pnl=value-cost,pct=cost?pnl/cost*100:0;return{symbol:s,h,price,value,cost,pnl,pct}}).sort((a,b)=>b.value-a.value);
 $('holdingsCount').textContent=positionRows.length+' position'+(positionRows.length===1?'':'s');
@@ -393,7 +397,7 @@ function trade(side){
   if(side==='BUY'&&total>availableCash()+1e-8)return alert('Not enough available virtual cash. Other open buy limit orders have reserved part of your balance.');
   if(side==='SELL'&&q>availableShares(selected)+1e-8)return alert('Not enough available shares. Other open sell limit orders have reserved part of this position.');
   if(!confirm('Place simulated LIMIT '+side+' order\\n\\n'+selected+' · '+q.toFixed(4)+' shares\\nLimit price: '+fmt(limit)+'\\nEstimated value: '+fmt(total)+'\\n\\nThis order remains pending until the simulated market reaches your limit price.'))return;
-  let order={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),side,symbol:selected,qty:q,limitPrice:limit,orderType:'LIMIT',status:'OPEN',createdAt:new Date().toISOString()};account.pending.unshift(order);account.orderLog.unshift({...order});save();render();return;
+  let order={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),side,symbol:selected,qty:q,filledQty:0,remainingQty:q,executionValue:0,limitPrice:limit,orderType:'LIMIT',status:'OPEN',createdAt:new Date().toISOString()};account.pending.unshift(order);account.orderLog.unshift({...order});save();render();return;
  }
  if(side==='BUY'&&total>availableCash()+1e-8)return alert('Not enough available virtual cash. Some funds are reserved by open buy limit orders.');
  if(side==='SELL'&&q>availableShares(selected)+1e-8)return alert('Not enough available shares. Some shares are reserved by open sell limit orders.');
@@ -407,14 +411,33 @@ function executeSimulatedOrder(side,symbol,q,price,type,quoteTime){
  account.history.unshift({side,symbol,qty:q,total,executionPrice:price,quoteTime,marketState:'SIMULATED',orderType:type,time:new Date().toISOString()});recordSnapshot(true);save();
 }
 function processPendingOrders(){
- let changed=false;
- for(const order of [...account.pending]){
+ let changed=false,liquidity={};
+ // Older orders receive priority; each symbol/side shares one liquidity budget this update.
+ const queue=[...account.pending].sort((a,b)=>new Date(a.createdAt||0)-new Date(b.createdAt||0));
+ for(const order of queue){
+  let remaining=remainingOrderQty(order);if(remaining<=1e-8)continue;
   let sides=quoteSides(order.symbol);if(!sides)continue;
-  let fillPrice=order.side==='BUY'?sides.ask:sides.bid;let triggered=order.side==='BUY'?sides.ask<=order.limitPrice:sides.bid>=order.limitPrice;if(!triggered)continue;
-  let h=account.holdings[order.symbol]||{qty:0,avg:0},total=order.qty*fillPrice;
-  if(order.side==='BUY'&&total>account.cash)continue;if(order.side==='SELL'&&order.qty>h.qty+1e-8)continue;
-  executeSimulatedOrder(order.side,order.symbol,order.qty,fillPrice,'LIMIT',quotes[order.symbol]?.receivedAt?new Date(quotes[order.symbol].receivedAt).toISOString():new Date().toISOString());
-  account.pending=account.pending.filter(x=>x.id!==order.id);let log=account.orderLog.find(x=>x.id===order.id);if(log){log.status='FILLED';log.updatedAt=new Date().toISOString();log.executionPrice=fillPrice}changed=true;
+  let fillPrice=order.side==='BUY'?sides.ask:sides.bid;
+  let triggered=order.side==='BUY'?sides.ask<=order.limitPrice:sides.bid>=order.limitPrice;if(!triggered)continue;
+  let key=order.symbol+'|'+order.side;if(!(key in liquidity))liquidity[key]=simulatedLiquidity(order.symbol);
+  let cashCapacity=order.side==='BUY'?availableCash(order.id)/fillPrice:Infinity;
+  let shareCapacity=order.side==='SELL'?availableShares(order.symbol,order.id):Infinity;
+  let fillQty=Math.min(remaining,liquidity[key],cashCapacity,shareCapacity);
+  if(!Number.isFinite(fillQty)||fillQty<=1e-8)continue;
+  let total=fillQty*fillPrice,quoteTime=quotes[order.symbol]?.receivedAt?new Date(quotes[order.symbol].receivedAt).toISOString():new Date().toISOString();
+  executeSimulatedOrder(order.side,order.symbol,fillQty,fillPrice,'LIMIT',quoteTime);
+  liquidity[key]-=fillQty;
+  let priorFilled=Number(order.filledQty)||0,priorValue=Number(order.executionValue)||priorFilled*(Number(order.executionPrice)||0);
+  order.filledQty=priorFilled+fillQty;order.executionValue=priorValue+total;order.executionPrice=order.executionValue/order.filledQty;
+  order.remainingQty=Math.max(0,(Number(order.qty)||0)-order.filledQty);
+  let log=account.orderLog.find(x=>x.id===order.id);
+  if(order.remainingQty<=1e-8){
+   order.remainingQty=0;account.pending=account.pending.filter(x=>x.id!==order.id);
+   if(log){log.status='FILLED';log.remainingQty=0;log.filledQty=order.filledQty;log.executionValue=order.executionValue;log.executionPrice=order.executionPrice;log.updatedAt=new Date().toISOString()}
+  }else if(log){
+   log.status='OPEN';log.filledQty=order.filledQty;log.remainingQty=order.remainingQty;log.executionValue=order.executionValue;log.executionPrice=order.executionPrice;log.updatedAt=new Date().toISOString();
+  }
+  changed=true;
  }
  if(changed)save();
 }
