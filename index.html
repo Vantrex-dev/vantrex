@@ -170,7 +170,7 @@ function reservedCash(excludeId){return account.pending.filter(o=>o.side==='BUY'
 function reservedShares(symbol,excludeId){return account.pending.filter(o=>o.side==='SELL'&&o.symbol===symbol&&o.id!==excludeId).reduce((sum,o)=>sum+remainingOrderQty(o),0)}
 function availableCash(excludeId){return Math.max(0,account.cash-reservedCash(excludeId))}
 function availableShares(symbol,excludeId){return Math.max(0,(account.holdings[symbol]?.qty||0)-reservedShares(symbol,excludeId))}
-// Each 60-second market refresh has a deterministic, fictional per-symbol liquidity budget.
+// Each market refresh has a deterministic, fictional per-symbol liquidity budget.
 function simulatedLiquidity(symbol){return 8+(symbolSeed(symbol)%33)}
 account.pending=Array.isArray(account.pending)?account.pending:[];account.orderLog=Array.isArray(account.orderLog)?account.orderLog:account.pending.map(o=>({...o,status:'OPEN'}));
 const directory=[
